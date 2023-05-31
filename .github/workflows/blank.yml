@@ -23,14 +23,79 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v3
+      createTag() {
+          versionSuffix=$1
+          source ./read_version.sh
+          echo "$VERSION_CODE"
+          versionCode=$VERSION_CODE
+          echo "versionSuffix: $versionSuffix"
+          if [[ ${CI_COMMIT_REF_NAME} = "release" ]]; then
+              versionPrefix="$versionCode-beta"
+              versionSuffix=$(git tag | grep "$versionCode-beta.*" | sort -V | awk -F'.' '{print $NF}' | tail -1)
+              versionSuffix=$(($versionSuffix + 1))
+              tagVersion="$versionPrefix.$versionSuffix"
+          elif [[ ${CI_COMMIT_REF_NAME} = "develop" ]]; then
+              versionPrefix="$versionCode-alpha"
+              versionSuffix=$(git tag | grep "$versionCode-alpha.*" | sort -V | awk -F'.' '{print $NF}' | tail -1)
+              versionSuffix=$(($versionSuffix + 1))
+              tagVersion="$versionPrefix.$versionSuffix"
+          elif [[ ${CI_COMMIT_REF_NAME} = "hotfix" ]]; then
+              versionPrefix="$versionCode-beta"
+              versionSuffix=$(git tag | grep "$versionCode-beta.*" | sort -V | awk -F'.' '{print $NF}' | tail -1)
+              versionSuffix=$(($versionSuffix + 1))
+              tagVersion="$versionPrefix.$versionSuffix"
+          elif [[ ${CI_COMMIT_REF_NAME} = "main" ]]; then
+              versionPrefix="$versionCode"
+          else
+              echo "tag creation not supported for branch: ${CI_COMMIT_REF_NAME}"
+          exit 1
+          fi
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
+          echo "creating tag for the branch: $tagVersion"
+          git config --global user.name "Sravan.Kumar2"
+          git config --global user.email "sravan.kumar@invafresh.com"
+          git remote add api-origin https://oauth2:$GITLAB_TOKEN@gitlab.com/invafresh/platform/uxui/periscope-mobile.git
+          git tag -a $tagVersion -m "release version: $tagVersion"
+          git push api-origin --tags
+      }
+      source ./read_version.sh
+      response=$(curl -s -w "%{http_code}" --location --request GET "https://gitlab.com/api/v4/projects/31336002/jobs/artifacts/${CI_COMMIT_REF_NAME}/raw/version.txt?job=create_version" --header "PRIVATE-TOKEN: $GITLAB_TOKEN" --output version-old.txt)
+      response1=$(curl -s -w "%{http_code}" --location --request GET "https://gitlab.com/api/v4/projects/31336002/jobs/artifacts/${CI_COMMIT_REF_NAME}/raw/version_code.txt?job=create_version" --header "PRIVATE-TOKEN: $GITLAB_TOKEN" --output version_code-old.txt)
+      echo $response
+      echo $response1
+      echo $VERSION_CODE
+      if [[ $response -eq 200 ]]; then
+        old_version=$(cat version-old.txt)
+        old_version_code=$(cat version_code-old.txt)
+        echo "old_version is $old_version"
+        source ./read_version.sh
+        echo "versioncode: $VERSION_CODE"
+        source ./read_version.sh
+        echo "old_version_code: $old_version_code"
+        
+        if [[ $old_version_code != $VERSION_CODE ]]; then
+          new_version=0
+         
+        elif [[ $old_version_code == $VERSION_CODE ]]; then
+          new_version=$((old_version + 1))
+          
+        else
+          new_version=$old_version
+        
+        fi
+        echo "$new_version" >version.txt
+        source ./read_version.sh
+        echo "$VERSION_CODE" >version_code.txt
+        echo $VERSION_CODE
+        createTag $(cat version.txt)
 
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
-        run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+      elif [[ $response -eq 404 ]]; then
+        new_version=1
+        echo "new version: $new_version"
+        echo "$new_version" >version.txt
+        source ./read_version.sh
+        echo "$VERSION_CODE" >version_code.txt
+        createTag $(cat version.txt)
+      else
+        echo "error in recieving the artifact, response code: $response" && exit 1
+      fi
